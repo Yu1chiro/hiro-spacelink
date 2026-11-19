@@ -7,7 +7,7 @@ const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
-const sanitizeHtml = require('sanitize-html');
+const xss = require('xss');
 const { Pool } = require('pg');
 
 // ---------- Config ----------
@@ -50,12 +50,21 @@ const genCode = () => crypto.randomBytes(6).toString('base64url').slice(0, 8);
 function cleanCredential(raw) {
   if (raw === undefined || raw === null || raw === '') return { value: null };
   if (typeof raw !== 'string') return { error: 'Format credential tidak valid' };
-  const html = sanitizeHtml(raw, {
-    allowedTags: ['p', 'br', 'strong', 'em', 'u', 's', 'ol', 'ul', 'li', 'h1', 'h2', 'h3', 'a', 'span'],
-    allowedAttributes: { a: ['href', 'target', 'rel'], span: [] },
-    allowedSchemes: ['http', 'https'],
-    transformTags: { a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noopener noreferrer' }) }
+
+  const html = xss(raw, {
+    whiteList: {
+      p: [], br: [], strong: [], em: [], u: [], s: [],
+      ol: [], ul: [], li: [], h1: [], h2: [], h3: [], span: [],
+      a: ['href', 'target', 'rel']
+    },
+    onTagAttr: function (tag, name, value, isWhiteAttr) {
+      if (tag === 'a' && name === 'href') {
+        if (!/^https?:\/\//i.test(value)) return '';
+        return 'href="' + xss.escapeAttrValue(value) + '" target="_blank" rel="noopener noreferrer"';
+      }
+    }
   });
+
   const text = html.replace(/<[^>]*>/g, '').trim();
   if (!text) return { value: null };
   if (html.length > 5000) return { error: 'Credential terlalu panjang (maks 5000 karakter)' };
