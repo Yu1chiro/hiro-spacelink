@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard — Hiro Space Link</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.49.1"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script>
+/* Hiro Space Link — shared UI · monochrome (shadcn × Sankou) */
+tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'Noto Sans JP', 'ui-sans-serif', 'system-ui', 'sans-serif'] } } } };
+
+(function injectStyle() {
+  const s = document.createElement('style');
+  s.textContent = `
+  html{scroll-behavior:smooth}
+  body{font-family:Inter,'Noto Sans JP',system-ui,sans-serif;color:#18181b;background:#fafafa;min-height:100vh;font-size:14px;letter-spacing:-.005em;-webkit-font-smoothing:antialiased}
+  :focus-visible{outline:2px solid #18181b;outline-offset:2px}
+  .no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{scrollbar-width:none}
+  @keyframes pop{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  @keyframes shake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}30%,50%,70%{transform:translateX(-6px)}40%,60%{transform:translateX(6px)}}
+  @keyframes slidein{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+  .modal-pop{animation:pop .18s ease-out}.fade-in{animation:fade .18s ease-out}.shake{animation:shake .45s}.toast-in{animation:slidein .2s ease-out}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  .ql-toolbar.ql-snow{border-color:#e4e4e7!important;background:#fafafa;border-radius:.375rem .375rem 0 0;padding:8px 10px}
+  .ql-container.ql-snow{border-color:#e4e4e7!important;border-radius:0 0 .375rem .375rem;background:#fff;font-family:Inter,'Noto Sans JP',sans-serif;font-size:14px}
+  .ql-editor{min-height:130px;max-height:220px;overflow-y:auto}
+  .ql-editor.ql-blank::before{color:#a1a1aa;font-style:normal}
+  .ql-snow .ql-stroke{stroke:#52525b}.ql-snow .ql-fill{fill:#52525b}
+  .ql-snow.ql-toolbar button:hover .ql-stroke,.ql-snow.ql-toolbar button.ql-active .ql-stroke{stroke:#18181b}
+  .cred h1{font-size:1.15rem;font-weight:600}.cred h2{font-size:1.05rem;font-weight:600}.cred h3{font-weight:600}
+  .cred ul{list-style:disc;padding-left:1.25rem}.cred ol{list-style:decimal;padding-left:1.25rem}
+  .cred a{color:#18181b;text-decoration:underline}.cred p{margin:.25rem 0;word-break:break-word}
+  `;
+  document.head.appendChild(s);
+})();
+
+/* ---------- Constants ---------- */
+const CATS = [
+  { name: 'Resources', icon: 'fa-solid fa-book-open' },
+  { name: 'Academic', icon: 'fa-solid fa-graduation-cap' },
+  { name: 'Project', icon: 'fa-solid fa-diagram-project' },
+  { name: 'Work', icon: 'fa-solid fa-briefcase' },
+  { name: 'Google Drive', icon: 'fa-brands fa-google-drive' },
+  { name: 'Google Maps', icon: 'fa-solid fa-location-dot' },
+  { name: 'Github', icon: 'fa-brands fa-github' },
+  { name: 'Japanese', icon: 'fa-solid fa-torii-gate' },
+  { name: 'Instagram', icon: 'fa-brands fa-instagram' },
+  { name: 'Tiktok', icon: 'fa-brands fa-tiktok' },
+  { name: 'Discord', icon: 'fa-brands fa-discord' },
+  { name: 'Invitation', icon: 'fa-solid fa-envelope-open-text' }
+].map((c) => ({ ...c, bg: 'bg-zinc-50 border border-zinc-200', text: 'text-zinc-700' }));
+const catOf = (n) => CATS.find((c) => c.name === n) || CATS[0];
+const BTN = 'inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-md text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2 active:scale-[.98]';
+const BTN_P = BTN + ' bg-zinc-900 text-white hover:bg-zinc-700';
+const BTN_S = BTN + ' bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-100';
+const BTN_D = BTN + ' bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-900 hover:text-white hover:border-zinc-900';
+const INPUT = 'w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 transition';
+const NAV_SIDE = 'right'; // 'right' | 'left' — posisi sidebar admin di desktop
+
+/* ---------- Utils ---------- */
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const $ = (sel, root = document) => root.querySelector(sel);
+
+async function api(url, opt = {}) {
+  const o = { method: opt.method || 'GET', credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } };
+  if (opt.body !== undefined) { o.headers['Content-Type'] = 'application/json'; o.body = JSON.stringify(opt.body); }
+  let res;
+  try { res = await fetch(url, o); } catch { throw new Error('Tidak dapat terhubung ke server'); }
+  let data = {};
+  try { data = await res.json(); } catch { /* empty */ }
+  if (res.status === 401 && location.pathname !== '/') { location.href = '/'; throw new Error('Sesi berakhir'); }
+  if (!res.ok) throw new Error(data.error || 'Terjadi kesalahan');
+  return data;
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const t = document.createElement('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove();
+  }
+}
+
+/* ---------- Toast ---------- */
+function toast(message, type = 'success') {
+  let box = $('#toasts');
+  if (!box) {
+    box = document.createElement('div'); box.id = 'toasts';
+    box.className = 'fixed z-[100] top-3 inset-x-3 sm:inset-x-auto sm:right-5 sm:top-5 sm:w-96 flex flex-col gap-2 pointer-events-none';
+    document.body.appendChild(box);
+  }
+  const t = {
+    success: ['fa-circle-check', 'bg-zinc-900 text-white border border-zinc-900'],
+    error: ['fa-circle-exclamation', 'bg-white text-zinc-900 border border-zinc-900'],
+    info: ['fa-circle-info', 'bg-zinc-100 text-zinc-900 border border-zinc-200']
+  }[type] || ['fa-circle-info', 'bg-zinc-100 text-zinc-900 border border-zinc-200'];
+  const el = document.createElement('div');
+  el.className = `toast-in pointer-events-auto flex items-start gap-3 rounded-lg px-4 py-3 shadow-lg ${t[1]}`;
+  el.innerHTML = `<i class="fa-solid ${t[0]} mt-0.5"></i><p class="flex-1 text-sm font-medium leading-snug">${esc(message)}</p>
+    <button class="opacity-70 hover:opacity-100" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>`;
+  const close = () => { el.style.transition = 'opacity .2s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 200); };
+  el.querySelector('button').onclick = close;
+  box.appendChild(el);
+  setTimeout(close, 3800);
+}
+
+/* ---------- Modal ---------- */
+function openModal(html, { size = 'sm:max-w-md', onClose } = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'fixed inset-0 z-50 flex items-end sm:items-center justify-center fade-in';
+  wrap.innerHTML = `<div data-bg class="absolute inset-0 bg-zinc-900/40 backdrop-blur-[2px]"></div>
+    <div role="dialog" aria-modal="true" class="modal-pop relative w-full ${size} max-h-[92vh] overflow-y-auto bg-white rounded-t-xl sm:rounded-xl shadow-2xl border border-zinc-200 p-6 sm:p-7">${html}</div>`;
+  document.body.appendChild(wrap);
+  document.body.style.overflow = 'hidden';
+  const panel = wrap.lastElementChild;
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  function close() {
+    document.removeEventListener('keydown', onKey);
+    wrap.remove();
+    if (!$('.fixed.inset-0.z-50')) document.body.style.overflow = '';
+    if (onClose) onClose();
+  }
+  document.addEventListener('keydown', onKey);
+  wrap.querySelector('[data-bg]').onclick = close;
+  panel.querySelectorAll('[data-close]').forEach((b) => (b.onclick = close));
+  return { el: panel, close };
+}
+
+function confirmBox({ title, text, okText = 'Hapus' }) {
+  return new Promise((resolve) => {
+    let done = false;
+    const m = openModal(`
+      <div class="text-center space-y-5">
+        <div class="mx-auto w-12 h-12 rounded-full border border-zinc-200 bg-zinc-50 text-zinc-900 flex items-center justify-center text-lg"><i class="fa-solid fa-trash-can"></i></div>
+        <div class="space-y-1.5"><h3 class="text-lg font-semibold tracking-tight">${esc(title)}</h3><p class="text-zinc-500 text-sm leading-relaxed">${esc(text)}</p></div>
+        <div class="grid grid-cols-2 gap-3 pt-1">
+          <button data-close class="${BTN_S} py-2.5">Batal</button>
+          <button id="cf-ok" class="${BTN_P} py-2.5">${esc(okText)}</button>
+        </div>
+      </div>`, { onClose: () => { if (!done) resolve(false); } });
+    m.el.querySelector('#cf-ok').onclick = () => { done = true; m.close(); resolve(true); };
+  });
+}
+
+/* ---------- Navigation: sidebar admin (desktop) + header & bottom bar (mobile) ---------- */
+function mountNav(active) {
+  const items = [
+    { href: '/dashboard', key: 'dashboard', icon: 'fa-solid fa-table-columns', label: 'Dashboard' },
+    { href: '/manage-link', key: 'manage', icon: 'fa-solid fa-link', label: 'Kelola Link' }
+  ];
+  const R = NAV_SIDE === 'right';
+  document.body.classList.add(R ? 'md:pr-60' : 'md:pl-60');
+  const current = items.find((i) => i.key === active);
+
+  const header = document.createElement('header');
+  header.className = 'md:hidden sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-zinc-200';
+  header.innerHTML = `<div class="px-4 h-14 flex items-center">
+    <a href="/dashboard" class="flex items-center gap-3">
+      <span class="w-8 h-8 rounded-md bg-zinc-900 text-white flex items-center justify-center text-sm"><i class="fa-solid fa-link"></i></span>
+      <span class="font-semibold tracking-tight">Hiro Space Link</span>
+    </a></div>`;
+  document.body.prepend(header);
+
+  const top = document.createElement('div');
+  top.className = 'hidden md:flex sticky top-0 z-20 h-14 items-center px-10 border-b border-zinc-200 bg-white/85 backdrop-blur-md text-sm text-zinc-500';
+  top.innerHTML = `<span>Hiro Space Link</span><i class="fa-solid fa-chevron-right text-[9px] mx-3 text-zinc-300"></i><span class="font-medium text-zinc-900">${current ? current.label : ''}</span>`;
+  document.body.prepend(top);
+
+  const side = document.createElement('aside');
+  side.className = `hidden md:flex fixed top-0 ${R ? 'right-0 border-l' : 'left-0 border-r'} z-40 h-screen w-60 flex-col bg-white border-zinc-200`;
+  side.innerHTML = `
+    <a href="/dashboard" class="flex items-center gap-3 h-14 px-5 border-b border-zinc-200">
+      <span class="w-8 h-8 rounded-md bg-zinc-900 text-white flex items-center justify-center text-sm"><i class="fa-solid fa-link"></i></span>
+      <span class="font-semibold tracking-tight">Hiro Space Link</span>
+    </a>
+    <nav class="flex-1 p-3 space-y-1">
+      <p class="px-3 pt-3 pb-2 text-xs text-zinc-400">Menu</p>
+      ${items.map((i) => `<a href="${i.href}" ${i.key === active ? 'aria-current="page"' : ''} class="flex items-center gap-3 px-3 py-2 rounded-md text-sm transition ${i.key === active ? 'bg-zinc-100 text-zinc-900 font-semibold' : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900'}"><i class="${i.icon} w-4 text-center"></i>${i.label}</a>`).join('')}
+    </nav>
+    <div class="p-3 border-t border-zinc-200">
+      <button id="nav-logout" class="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 transition"><i class="fa-solid fa-right-from-bracket w-4 text-center"></i>Keluar</button>
+    </div>`;
+  document.body.appendChild(side);
+
+  const bottom = document.createElement('nav');
+  bottom.className = 'md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-zinc-200 px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]';
+  bottom.innerHTML = `<div class="grid grid-cols-3 gap-2">
+    ${items.map((i) => `<a href="${i.href}" class="flex flex-col items-center gap-1 py-2 rounded-md text-xs font-medium transition ${i.key === active ? 'bg-zinc-900 text-white' : 'text-zinc-500'}"><i class="${i.icon} text-lg"></i>${i.label}</a>`).join('')}
+    <button id="nav-logout-m" class="flex flex-col items-center gap-1 py-2 rounded-md text-xs font-medium text-zinc-500"><i class="fa-solid fa-right-from-bracket text-lg"></i>Keluar</button></div>`;
+  document.body.appendChild(bottom);
+
+  const logout = async () => {
+    try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+    location.href = '/';
+  };
+  $('#nav-logout').onclick = logout; $('#nav-logout-m').onclick = logout;
+}
+
+/* ---------- QR & Credential modals ---------- */
+const shortUrl = (l) => `${location.origin}/s/${l.code}`;
+
+function showQR(l) {
+  const url = shortUrl(l);
+  const c = catOf(l.category);
+  const m = openModal(`
+    <div class="text-center space-y-5">
+      <div class="space-y-2"><span class="inline-flex items-center gap-2 text-xs font-medium px-2.5 py-1 rounded-md ${c.bg} ${c.text}"><i class="${c.icon}"></i>${esc(l.category)}</span>
+        <h3 class="text-lg font-semibold tracking-tight break-words">${esc(l.name)}</h3>
+        <p class="text-sm text-zinc-500">Minta teman scan — langsung menuju link tujuan.</p></div>
+      <div class="mx-auto w-fit p-4 bg-white rounded-lg border border-zinc-200"><div id="qr-box"></div></div>
+      <p class="text-xs text-zinc-500 break-all bg-zinc-50 border border-zinc-200 rounded-md px-3 py-2">${esc(url)}</p>
+      <div class="grid grid-cols-2 gap-3">
+        <button id="qr-copy" class="${BTN_S} py-2.5"><i class="fa-regular fa-copy"></i>Salin link</button>
+        <button id="qr-dl" class="${BTN_P} py-2.5"><i class="fa-solid fa-download"></i>Unduh QR</button>
+      </div>
+      <button data-close class="${BTN_S} w-full py-2.5">Tutup</button>
+    </div>`);
+  const box = m.el.querySelector('#qr-box');
+  new QRCode(box, { text: url + '?src=qr', width: 220, height: 220, colorDark: '#09090b', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+  m.el.querySelector('#qr-copy').onclick = async () => { await copyText(url); toast('Link pendek disalin'); };
+  m.el.querySelector('#qr-dl').onclick = () => {
+    const src = box.querySelector('canvas'); if (!src) return toast('QR belum siap', 'error');
+    const out = document.createElement('canvas'); out.width = out.height = src.width + 48;
+    const x = out.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, out.width, out.height); x.drawImage(src, 24, 24);
+    const a = document.createElement('a'); a.href = out.toDataURL('image/png'); a.download = `qr-${l.code}.png`; a.click();
+    toast('QR berhasil diunduh');
+  };
+}
+
+async function showCredential(l) {
+  const m = openModal(`
+    <div class="space-y-5">
+      <div class="flex items-center gap-3"><div class="w-10 h-10 rounded-md border border-zinc-200 bg-zinc-50 text-zinc-900 flex items-center justify-center"><i class="fa-solid fa-key"></i></div>
+        <div class="min-w-0"><h3 class="text-lg font-semibold tracking-tight">Credential</h3><p class="text-sm text-zinc-500 truncate">${esc(l.name)}</p></div></div>
+      <div id="cr-body" class="cred rounded-md bg-zinc-50 border border-zinc-200 p-4 text-sm leading-relaxed min-h-[96px] break-words">
+        <p class="text-zinc-500"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Membuka kunci...</p></div>
+      <p class="text-xs text-zinc-500"><i class="fa-solid fa-shield-halved mr-1"></i>Tersimpan terenkripsi AES-256. Jangan dibagikan ke orang lain.</p>
+      <div class="grid grid-cols-2 gap-3"><button id="cr-copy" class="${BTN_S} py-2.5"><i class="fa-regular fa-copy"></i>Salin teks</button>
+        <button data-close class="${BTN_P} py-2.5">Tutup</button></div>
+    </div>`);
+  const body = m.el.querySelector('#cr-body');
+  try {
+    const { credential } = await api(`/api/links/${l.id}/credential`);
+    body.innerHTML = credential || '<p class="text-zinc-500">Tidak ada credential.</p>'; // sudah disanitasi di server
+  } catch (e) { body.innerHTML = `<p class="text-zinc-900 font-medium">${esc(e.message)}</p>`; }
+  m.el.querySelector('#cr-copy').onclick = async () => { await copyText(body.innerText); toast('Credential disalin'); };
+}
+
+/* ---------- Library ---------- */
+function cardHTML(l, manage) {
+  const c = catOf(l.category);
+  let host = ''; try { host = new URL(l.url).host.replace(/^www\./, ''); } catch { /* ignore */ }
+  return `<article data-id="${l.id}" class="bg-white border border-zinc-200 rounded-lg p-5 hover:border-zinc-400 transition flex flex-col gap-4">
+    <div class="flex items-start gap-3">
+      <div class="w-10 h-10 shrink-0 rounded-md flex items-center justify-center ${c.bg} ${c.text}"><i class="${c.icon}"></i></div>
+      <div class="min-w-0 flex-1"><h3 class="font-semibold text-zinc-900 leading-snug break-words">${esc(l.name)}</h3>
+        <p class="text-xs text-zinc-500 truncate mt-0.5">${esc(host)}</p></div>
+    </div>
+    <div class="flex flex-wrap items-center gap-2 text-xs">
+      <span class="px-2 py-0.5 rounded-md font-medium border border-zinc-200 text-zinc-600">${esc(l.category)}</span>
+      ${l.has_credential ? '<span class="px-2 py-0.5 rounded-md font-medium bg-zinc-900 text-white"><i class="fa-solid fa-lock mr-1"></i>Credential</span>' : ''}
+      <span class="ml-auto text-zinc-500 font-medium" title="Klik + scan"><i class="fa-regular fa-eye mr-1"></i>${l.click_count + l.scan_count}</span>
+    </div>
+    <div class="flex flex-wrap gap-2 pt-4 border-t border-zinc-100">
+      <a href="/s/${esc(l.code)}" target="_blank" rel="noopener noreferrer" class="${BTN_P}"><i class="fa-solid fa-arrow-up-right-from-square"></i>Buka</a>
+      <button data-act="qr" class="${BTN_S}"><i class="fa-solid fa-qrcode"></i>QR</button>
+      <button data-act="copy" class="${BTN_S}" aria-label="Salin link"><i class="fa-regular fa-copy"></i></button>
+      ${l.has_credential ? `<button data-act="cred" class="${BTN_S}" aria-label="Lihat credential"><i class="fa-solid fa-key"></i></button>` : ''}
+      ${manage ? `<button data-act="edit" class="${BTN_S}" aria-label="Edit"><i class="fa-solid fa-pen"></i></button>
+      <button data-act="delete" class="${BTN_D}" aria-label="Hapus"><i class="fa-solid fa-trash-can"></i></button>` : ''}
+    </div></article>`;
+}
+
+function mountLibrary(root, { manage = false, onEdit, onDelete, onLoaded } = {}) {
+  root.innerHTML = `<div class="space-y-4">
+    <div class="relative"><i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 text-sm"></i>
+      <input id="lib-search" type="search" autocomplete="off" placeholder="Cari nama, link, atau kategori..." class="${INPUT} pl-10"></div>
+    <div id="lib-cats" class="flex gap-2 overflow-x-auto md:flex-wrap md:overflow-visible no-scrollbar py-1"></div>
+    <p id="lib-count" class="text-xs text-zinc-500 font-medium"></p>
+    <div id="lib-grid" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"></div></div>`;
+  const grid = $('#lib-grid', root), catsEl = $('#lib-cats', root), count = $('#lib-count', root), search = $('#lib-search', root);
+  const state = { search: '', category: '', links: [] };
+
+  const chip = (label, val, icon) => `<button data-cat="${esc(val)}" class="shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition border ${state.category === val ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-100'}">${icon ? `<i class="${icon}"></i>` : ''}${esc(label)}</button>`;
+  const renderChips = () => { catsEl.innerHTML = chip('Semua', '', 'fa-solid fa-layer-group') + CATS.map((c) => chip(c.name, c.name, c.icon)).join(''); };
+
+  async function load() {
+    grid.innerHTML = Array.from({ length: 3 }, () => '<div class="h-44 rounded-lg bg-zinc-100 animate-pulse"></div>').join('');
+    try {
+      const q = new URLSearchParams({ search: state.search, category: state.category });
+      state.links = (await api('/api/links?' + q)).links;
+    } catch (e) { grid.innerHTML = ''; return toast(e.message, 'error'); }
+    count.textContent = `${state.links.length} link ditemukan`;
+    grid.innerHTML = state.links.length ? state.links.map((l) => cardHTML(l, manage)).join('') : `
+      <div class="sm:col-span-2 xl:col-span-3 text-center py-14 px-6 bg-white rounded-lg border border-dashed border-zinc-300">
+        <div class="text-3xl mb-3 text-zinc-300"><i class="fa-regular fa-folder-open"></i></div>
+        <p class="font-semibold text-zinc-900">Belum ada link di sini</p>
+        <p class="text-sm text-zinc-500 mt-1">${state.search || state.category ? 'Coba kata kunci atau kategori lain.' : 'Tambahkan link pertama di halaman Kelola Link.'}</p></div>`;
+    if (onLoaded) onLoaded(state.links);
+  }
+
+  let timer;
+  search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { state.search = search.value.trim(); load(); }, 300); });
+  catsEl.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-cat]'); if (!b) return;
+    state.category = b.dataset.cat; renderChips(); load();
+  });
+  grid.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    const l = state.links.find((x) => x.id === Number(b.closest('[data-id]').dataset.id)); if (!l) return;
+    const act = b.dataset.act;
+    if (act === 'qr') showQR(l);
+    else if (act === 'copy') { await copyText(shortUrl(l)); toast('Link pendek disalin'); }
+    else if (act === 'cred') showCredential(l);
+    else if (act === 'edit' && onEdit) onEdit(l);
+    else if (act === 'delete' && onDelete) onDelete(l);
+  });
+
+  renderChips(); load();
+  return { reload: load };
+}
+
+</script>
+</head>
+<body>
+  <main class="max-w-5xl mx-auto px-4 sm:px-6 md:px-10 pt-6 sm:pt-8 md:pt-10 pb-32 md:pb-16 space-y-8">
+
+    <!-- Profil -->
+    <section id="profile" class="bg-white border border-zinc-200 rounded-lg p-6 sm:p-7">
+      <div class="h-20 animate-pulse bg-zinc-100 rounded-md"></div>
+    </section>
+
+    <!-- Statistik ringkas -->
+    <section id="stats" class="grid grid-cols-2 lg:grid-cols-4 gap-px bg-zinc-200 border border-zinc-200 rounded-lg overflow-hidden"></section>
+
+    <!-- Grafik -->
+    <section class="grid gap-4 lg:grid-cols-3">
+      <div class="bg-white border border-zinc-200 rounded-lg p-5">
+        <h2 class="text-sm font-semibold text-zinc-900">Link per kategori</h2>
+        <p class="text-xs text-zinc-500 mb-3">Sebaran koleksi link kamu</p>
+        <div id="chart-cat"></div>
+      </div>
+      <div class="bg-white border border-zinc-200 rounded-lg p-5">
+        <h2 class="text-sm font-semibold text-zinc-900">Link baru</h2>
+        <p class="text-xs text-zinc-500 mb-3">6 bulan terakhir</p>
+        <div id="chart-month"></div>
+      </div>
+      <div class="bg-white border border-zinc-200 rounded-lg p-5">
+        <h2 class="text-sm font-semibold text-zinc-900">Paling sering dibuka</h2>
+        <p class="text-xs text-zinc-500 mb-4">Klik + scan QR</p>
+        <ol id="top-list" class="divide-y divide-zinc-100"></ol>
+      </div>
+    </section>
+
+    <!-- Perpustakaan -->
+    <section class="space-y-5">
+      <div class="pb-4 border-b border-zinc-200">
+        <h2 class="text-lg font-semibold tracking-tight text-zinc-900">Perpustakaan Link</h2>
+        <p class="text-sm text-zinc-500 mt-0.5">Cari, buka, atau bagikan lewat QR code.</p>
+      </div>
+      <div id="library"></div>
+    </section>
+  </main>
+
+  <script>
+    mountNav('dashboard');
+    const PALETTE = ['#09090b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#8b8b93', '#a1a1aa', '#b4b4bb', '#c8c8cd', '#d4d4d8', '#e4e4e7', '#ececee'];
+    let profile = null;
+    let charts = [];
+
+    const greet = () => { const h = new Date().getHours(); return h < 11 ? 'Selamat pagi' : h < 15 ? 'Selamat siang' : h < 18 ? 'Selamat sore' : 'Selamat malam'; };
+
+    function renderProfile() {
+      const p = profile;
+      document.getElementById('profile').innerHTML = `
+        <div class="flex flex-col sm:flex-row sm:items-center gap-5 sm:gap-6">
+          <div class="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-lg bg-zinc-900 text-white flex items-center justify-center text-3xl font-semibold">${esc((p.display_name || '?').charAt(0).toUpperCase())}</div>
+          <div class="flex-1 min-w-0 space-y-1">
+            <p class="text-xs text-zinc-500">${greet()}</p>
+            <h1 class="text-2xl font-semibold tracking-tight text-zinc-900 break-words">${esc(p.display_name)}</h1>
+            ${p.headline ? `<p class="text-sm font-medium text-zinc-700">${esc(p.headline)}</p>` : ''}
+            ${p.bio ? `<p class="text-sm text-zinc-500 leading-relaxed">${esc(p.bio)}</p>` : ''}
+          </div>
+          <div class="flex gap-2 sm:flex-col">
+            <button id="edit-profile" class="${BTN_S} flex-1 sm:flex-none"><i class="fa-solid fa-pen"></i>Edit profil</button>
+            <a href="/manage-link" class="${BTN_P} flex-1 sm:flex-none"><i class="fa-solid fa-plus"></i>Tambah link</a>
+          </div>
+        </div>`;
+      document.getElementById('edit-profile').onclick = editProfile;
+    }
+
+    function editProfile() {
+      const m = openModal(`
+        <div class="space-y-6">
+          <div class="space-y-1"><h3 class="text-lg font-semibold tracking-tight">Edit profil</h3><p class="text-sm text-zinc-500">Tampil di bagian atas dashboard.</p></div>
+          <form id="pf" class="space-y-4">
+            <div class="space-y-1.5"><label class="text-sm font-medium" for="pf-name">Nama</label><input id="pf-name" maxlength="80" required class="${INPUT}" value="${esc(profile.display_name)}"></div>
+            <div class="space-y-1.5"><label class="text-sm font-medium" for="pf-head">Headline</label><input id="pf-head" maxlength="120" class="${INPUT}" value="${esc(profile.headline)}"></div>
+            <div class="space-y-1.5"><label class="text-sm font-medium" for="pf-bio">Bio</label><textarea id="pf-bio" maxlength="300" rows="3" class="${INPUT} resize-none">${esc(profile.bio)}</textarea></div>
+            <div class="grid grid-cols-2 gap-3 pt-2"><button type="button" data-close class="${BTN_S} py-2.5">Batal</button><button type="submit" class="${BTN_P} py-2.5"><i class="fa-solid fa-check"></i>Simpan</button></div>
+          </form>
+        </div>`);
+      m.el.querySelector('#pf').onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          profile = await api('/api/profile', { method: 'PUT', body: {
+            display_name: m.el.querySelector('#pf-name').value,
+            headline: m.el.querySelector('#pf-head').value,
+            bio: m.el.querySelector('#pf-bio').value } });
+          renderProfile(); m.close(); toast('Profil diperbarui');
+        } catch (err) { toast(err.message, 'error'); }
+      };
+    }
+
+    function statCard(icon, label, value) {
+      return `<div class="bg-white p-5 flex flex-col gap-4">
+        <div class="flex items-center justify-between text-zinc-500"><p class="text-sm">${label}</p><i class="${icon} text-sm"></i></div>
+        <p class="text-3xl font-semibold tracking-tight text-zinc-900 leading-none">${value}</p></div>`;
+    }
+
+    function emptyChart(el, msg) {
+      el.innerHTML = `<div class="h-56 flex flex-col items-center justify-center text-center text-zinc-500 gap-2"><i class="fa-solid fa-chart-simple text-2xl text-zinc-300"></i><p class="text-sm">${msg}</p></div>`;
+    }
+
+    function renderStats(s) {
+      document.getElementById('stats').innerHTML =
+        statCard('fa-solid fa-link', 'Total link', s.total) +
+        statCard('fa-solid fa-folder-tree', 'Kategori terpakai', `${s.cats}<span class="text-base text-zinc-400 font-medium">/${CATS.length}</span>`) +
+        statCard('fa-solid fa-hand-pointer', 'Total klik', s.clicks) +
+        statCard('fa-solid fa-qrcode', 'Scan QR', s.scans);
+
+      charts.forEach((c) => c.destroy()); charts = [];
+      const catEl = document.getElementById('chart-cat'), monEl = document.getElementById('chart-month');
+
+      if (!s.total) { emptyChart(catEl, 'Belum ada data kategori'); emptyChart(monEl, 'Belum ada data bulanan'); }
+      else {
+        catEl.innerHTML = '';
+        const donut = new ApexCharts(catEl, {
+          chart: { type: 'donut', height: 290, fontFamily: 'Inter, Noto Sans JP, sans-serif', animations: { speed: 400 } },
+          series: s.byCategory.map((c) => c.count), labels: s.byCategory.map((c) => c.category), colors: PALETTE,
+          legend: { position: 'bottom', fontWeight: 500, fontSize: '12px', labels: { colors: '#52525b' } }, dataLabels: { enabled: false },
+          stroke: { colors: ['#ffffff'], width: 2 },
+          plotOptions: { pie: { donut: { size: '70%', labels: { show: true, total: { show: true, label: 'Total', color: '#18181b', formatter: () => s.total } } } } }
+        });
+        donut.render(); charts.push(donut);
+
+        monEl.innerHTML = '';
+        const bar = new ApexCharts(monEl, {
+          chart: { type: 'bar', height: 290, toolbar: { show: false }, fontFamily: 'Inter, Noto Sans JP, sans-serif' },
+          series: [{ name: 'Link baru', data: s.monthly.map((m) => m.n) }], xaxis: { categories: s.monthly.map((m) => m.label), labels: { style: { colors: '#71717a', fontWeight: 500 } }, axisBorder: { color: '#e4e4e7' }, axisTicks: { show: false } },
+          yaxis: { labels: { formatter: (v) => Math.round(v), style: { colors: '#71717a' } }, min: 0 },
+          colors: ['#18181b'], plotOptions: { bar: { borderRadius: 3, columnWidth: '45%' } }, dataLabels: { enabled: false },
+          grid: { borderColor: '#f4f4f5', strokeDashArray: 0 }
+        });
+        bar.render(); charts.push(bar);
+      }
+
+      const top = document.getElementById('top-list');
+      const rows = s.top.filter((t) => t.visits > 0);
+      top.innerHTML = rows.length ? rows.map((t, i) => {
+        const c = catOf(t.category);
+        return `<li class="flex items-center gap-3 py-3 first:pt-0 last:pb-0"><span class="w-7 h-7 shrink-0 rounded-md flex items-center justify-center text-xs font-semibold ${c.bg} ${c.text}">${i + 1}</span>
+          <div class="min-w-0 flex-1"><p class="font-medium text-sm text-zinc-900 truncate">${esc(t.name)}</p><p class="text-xs text-zinc-500">${esc(t.category)}</p></div>
+          <span class="text-sm font-semibold text-zinc-900">${t.visits}<span class="text-xs font-medium text-zinc-400 ml-1">x</span></span></li>`;
+      }).join('') : '<li class="py-10 text-center text-sm text-zinc-500"><i class="fa-regular fa-folder-open text-2xl text-zinc-300 block mb-2"></i>Belum ada link yang dibuka</li>';
+    }
+
+    (async () => {
+      try {
+        const [p, s] = await Promise.all([api('/api/profile'), api('/api/stats')]);
+        profile = p; renderProfile(); renderStats(s);
+      } catch (e) { toast(e.message, 'error'); }
+    })();
+    mountLibrary(document.getElementById('library'), { manage: false });
+  </script>
+</body>
+</html>
