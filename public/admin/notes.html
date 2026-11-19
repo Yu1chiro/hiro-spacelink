@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notes — Hiro Space Link</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.snow.css">
+  <script src="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.min.js"></script>
+  <script>
+/* Hiro Space Link — shared UI · monochrome (shadcn × Sankou) */
+tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'Noto Sans JP', 'ui-sans-serif', 'system-ui', 'sans-serif'] } } } };
+
+(function injectStyle() {
+  const s = document.createElement('style');
+  s.textContent = `
+  html{scroll-behavior:smooth}
+  body{font-family:Inter,'Noto Sans JP',system-ui,sans-serif;color:#18181b;background:#fafafa;min-height:100vh;font-size:14px;letter-spacing:-.005em;-webkit-font-smoothing:antialiased}
+  :focus-visible{outline:2px solid #18181b;outline-offset:2px}
+  .no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{scrollbar-width:none}
+  @keyframes pop{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  @keyframes shake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}30%,50%,70%{transform:translateX(-6px)}40%,60%{transform:translateX(6px)}}
+  @keyframes slidein{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+  .modal-pop{animation:pop .18s ease-out}.fade-in{animation:fade .18s ease-out}.shake{animation:shake .45s}.toast-in{animation:slidein .2s ease-out}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  .ql-toolbar.ql-snow{border-color:#e4e4e7!important;background:#fafafa;border-radius:.375rem .375rem 0 0;padding:8px 10px}
+  .ql-container.ql-snow{border-color:#e4e4e7!important;border-radius:0 0 .375rem .375rem;background:#fff;font-family:Inter,'Noto Sans JP',sans-serif;font-size:14px}
+  .ql-editor{min-height:130px;max-height:220px;overflow-y:auto}
+  .ql-editor.ql-blank::before{color:#a1a1aa;font-style:normal}
+  .ql-snow .ql-stroke{stroke:#52525b}.ql-snow .ql-fill{fill:#52525b}
+  .ql-snow.ql-toolbar button:hover .ql-stroke,.ql-snow.ql-toolbar button.ql-active .ql-stroke{stroke:#18181b}
+  .cred h1{font-size:1.15rem;font-weight:600}.cred h2{font-size:1.05rem;font-weight:600}.cred h3{font-weight:600}
+  .cred ul{list-style:disc;padding-left:1.25rem}.cred ol{list-style:decimal;padding-left:1.25rem}
+  .cred a{color:#18181b;text-decoration:underline}.cred p{margin:.25rem 0;word-break:break-word}
+  `;
+  document.head.appendChild(s);
+})();
+
+/* ---------- Constants ---------- */
+const CATS = [
+  { name: 'Resources', icon: 'fa-solid fa-book-open' },
+  { name: 'Academic', icon: 'fa-solid fa-graduation-cap' },
+  { name: 'Project', icon: 'fa-solid fa-diagram-project' },
+  { name: 'Work', icon: 'fa-solid fa-briefcase' },
+  { name: 'Google Drive', icon: 'fa-brands fa-google-drive' },
+  { name: 'Google Maps', icon: 'fa-solid fa-location-dot' },
+  { name: 'Github', icon: 'fa-brands fa-github' },
+  { name: 'Japanese', icon: 'fa-solid fa-torii-gate' },
+  { name: 'Instagram', icon: 'fa-brands fa-instagram' },
+  { name: 'Tiktok', icon: 'fa-brands fa-tiktok' },
+  { name: 'Discord', icon: 'fa-brands fa-discord' },
+  { name: 'Invitation', icon: 'fa-solid fa-envelope-open-text' }
+].map((c) => ({ ...c, bg: 'bg-zinc-50 border border-zinc-200', text: 'text-zinc-700' }));
+const catOf = (n) => CATS.find((c) => c.name === n) || CATS[0];
+const BTN = 'inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-md text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2 active:scale-[.98]';
+const BTN_P = BTN + ' bg-zinc-900 text-white hover:bg-zinc-700';
+const BTN_S = BTN + ' bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-100';
+const BTN_D = BTN + ' bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-900 hover:text-white hover:border-zinc-900';
+const INPUT = 'w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 transition';
+const NAV_SIDE = 'right'; // 'right' | 'left' — posisi sidebar admin di desktop
+
+/* ---------- Utils ---------- */
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const $ = (sel, root = document) => root.querySelector(sel);
+
+async function api(url, opt = {}) {
+  const o = { method: opt.method || 'GET', credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } };
+  if (opt.body !== undefined) { o.headers['Content-Type'] = 'application/json'; o.body = JSON.stringify(opt.body); }
+  let res;
+  try { res = await fetch(url, o); } catch { throw new Error('Tidak dapat terhubung ke server'); }
+  let data = {};
+  try { data = await res.json(); } catch { /* empty */ }
+  if (res.status === 401 && location.pathname !== '/') { location.href = '/'; throw new Error('Sesi berakhir'); }
+  if (!res.ok) throw new Error(data.error || 'Terjadi kesalahan');
+  return data;
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const t = document.createElement('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove();
+  }
+}
+
+/* ---------- Toast ---------- */
+function toast(message, type = 'success') {
+  let box = $('#toasts');
+  if (!box) {
+    box = document.createElement('div'); box.id = 'toasts';
+    box.className = 'fixed z-[100] top-3 inset-x-3 sm:inset-x-auto sm:right-5 sm:top-5 sm:w-96 flex flex-col gap-2 pointer-events-none';
+    document.body.appendChild(box);
+  }
+  const t = {
+    success: ['fa-circle-check', 'bg-zinc-900 text-white border border-zinc-900'],
+    error: ['fa-circle-exclamation', 'bg-white text-zinc-900 border border-zinc-900'],
+    info: ['fa-circle-info', 'bg-zinc-100 text-zinc-900 border border-zinc-200']
+  }[type] || ['fa-circle-info', 'bg-zinc-100 text-zinc-900 border border-zinc-200'];
+  const el = document.createElement('div');
+  el.className = `toast-in pointer-events-auto flex items-start gap-3 rounded-lg px-4 py-3 shadow-lg ${t[1]}`;
+  el.innerHTML = `<i class="fa-solid ${t[0]} mt-0.5"></i><p class="flex-1 text-sm font-medium leading-snug">${esc(message)}</p>
+    <button class="opacity-70 hover:opacity-100" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>`;
+  const close = () => { el.style.transition = 'opacity .2s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 200); };
+  el.querySelector('button').onclick = close;
+  box.appendChild(el);
+  setTimeout(close, 3800);
+}
+
+/* ---------- Modal ---------- */
+function openModal(html, { size = 'sm:max-w-md', onClose } = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'fixed inset-0 z-50 flex items-end sm:items-center justify-center fade-in';
+  wrap.innerHTML = `<div data-bg class="absolute inset-0 bg-zinc-900/40 backdrop-blur-[2px]"></div>
+    <div role="dialog" aria-modal="true" class="modal-pop relative w-full ${size} max-h-[92vh] overflow-y-auto bg-white rounded-t-xl sm:rounded-xl shadow-2xl border border-zinc-200 p-6 sm:p-7">${html}</div>`;
+  document.body.appendChild(wrap);
+  document.body.style.overflow = 'hidden';
+  const panel = wrap.lastElementChild;
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  function close() {
+    document.removeEventListener('keydown', onKey);
+    wrap.remove();
+    if (!$('.fixed.inset-0.z-50')) document.body.style.overflow = '';
+    if (onClose) onClose();
+  }
+  document.addEventListener('keydown', onKey);
+  wrap.querySelector('[data-bg]').onclick = close;
+  panel.querySelectorAll('[data-close]').forEach((b) => (b.onclick = close));
+  return { el: panel, close };
+}
+
+function confirmBox({ title, text, okText = 'Hapus' }) {
+  return new Promise((resolve) => {
+    let done = false;
+    const m = openModal(`
+      <div class="text-center space-y-5">
+        <div class="mx-auto w-12 h-12 rounded-full border border-zinc-200 bg-zinc-50 text-zinc-900 flex items-center justify-center text-lg"><i class="fa-solid fa-trash-can"></i></div>
+        <div class="space-y-1.5"><h3 class="text-lg font-semibold tracking-tight">${esc(title)}</h3><p class="text-zinc-500 text-sm leading-relaxed">${esc(text)}</p></div>
+        <div class="grid grid-cols-2 gap-3 pt-1">
+          <button data-close class="${BTN_S} py-2.5">Batal</button>
+          <button id="cf-ok" class="${BTN_P} py-2.5">${esc(okText)}</button>
+        </div>
+      </div>`, { onClose: () => { if (!done) resolve(false); } });
+    m.el.querySelector('#cf-ok').onclick = () => { done = true; m.close(); resolve(true); };
+  });
+}
+
+/* ---------- Navigation: sidebar admin (desktop) + header & bottom bar (mobile) ---------- */
+function mountNav(active) {
+  const items = [
+    { href: '/dashboard', key: 'dashboard', icon: 'fa-solid fa-table-columns', label: 'Dashboard' },
+    { href: '/manage-link', key: 'manage', icon: 'fa-solid fa-link', label: 'Kelola Link' },
+    { href: '/notes', key: 'notes', icon: 'fa-solid fa-note-sticky', label: 'Notes' }
+  ];
+  const R = NAV_SIDE === 'right';
+  document.body.classList.add(R ? 'md:pr-60' : 'md:pl-60');
+  const current = items.find((i) => i.key === active);
+
+  const header = document.createElement('header');
+  header.className = 'md:hidden sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-zinc-200';
+  header.innerHTML = `<div class="px-4 h-14 flex items-center">
+    <a href="/dashboard" class="flex items-center gap-3">
+      <span class="w-8 h-8 rounded-md bg-zinc-900 text-white flex items-center justify-center text-sm"><i class="fa-solid fa-link"></i></span>
+      <span class="font-semibold tracking-tight">Hiro Space Link</span>
+    </a></div>`;
+  document.body.prepend(header);
+
+  const top = document.createElement('div');
+  top.className = 'hidden md:flex sticky top-0 z-20 h-14 items-center px-10 border-b border-zinc-200 bg-white/85 backdrop-blur-md text-sm text-zinc-500';
+  top.innerHTML = `<span>Hiro Space Link</span><i class="fa-solid fa-chevron-right text-[9px] mx-3 text-zinc-300"></i><span class="font-medium text-zinc-900">${current ? current.label : ''}</span>`;
+  document.body.prepend(top);
+
+  const side = document.createElement('aside');
+  side.className = `hidden md:flex fixed top-0 ${R ? 'right-0 border-l' : 'left-0 border-r'} z-40 h-screen w-60 flex-col bg-white border-zinc-200`;
+  side.innerHTML = `
+    <a href="/dashboard" class="flex items-center gap-3 h-14 px-5 border-b border-zinc-200">
+      <span class="w-8 h-8 rounded-md bg-zinc-900 text-white flex items-center justify-center text-sm"><i class="fa-solid fa-link"></i></span>
+      <span class="font-semibold tracking-tight">Hiro Space Link</span>
+    </a>
+    <nav class="flex-1 p-3 space-y-1">
+      <p class="px-3 pt-3 pb-2 text-xs text-zinc-400">Menu</p>
+      ${items.map((i) => `<a href="${i.href}" ${i.key === active ? 'aria-current="page"' : ''} class="flex items-center gap-3 px-3 py-2 rounded-md text-sm transition ${i.key === active ? 'bg-zinc-100 text-zinc-900 font-semibold' : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900'}"><i class="${i.icon} w-4 text-center"></i>${i.label}</a>`).join('')}
+    </nav>
+    <div class="p-3 border-t border-zinc-200">
+      <button id="nav-logout" class="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 transition"><i class="fa-solid fa-right-from-bracket w-4 text-center"></i>Keluar</button>
+    </div>`;
+  document.body.appendChild(side);
+
+  const bottom = document.createElement('nav');
+  bottom.className = 'md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-zinc-200 px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]';
+  bottom.innerHTML = `<div class="grid grid-cols-4 gap-2">
+    ${items.map((i) => `<a href="${i.href}" class="flex flex-col items-center gap-1 py-2 rounded-md text-xs font-medium transition ${i.key === active ? 'bg-zinc-900 text-white' : 'text-zinc-500'}"><i class="${i.icon} text-lg"></i>${i.label}</a>`).join('')}
+    <button id="nav-logout-m" class="flex flex-col items-center gap-1 py-2 rounded-md text-xs font-medium text-zinc-500"><i class="fa-solid fa-right-from-bracket text-lg"></i>Keluar</button></div>`;
+  document.body.appendChild(bottom);
+
+  const logout = async () => {
+    try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+    location.href = '/';
+  };
+  $('#nav-logout').onclick = logout; $('#nav-logout-m').onclick = logout;
+}
+
+</script>
+  <style>
+    .ql-editor{min-height:280px;max-height:55vh}
+    .ql-editor pre.ql-syntax,.note-body pre{background:#18181b;color:#fafafa;border-radius:.375rem;padding:.75rem 1rem;overflow-x:auto;font-size:13px}
+    .note-body{font-size:15px;line-height:1.75;color:#27272a;word-break:break-word}
+    .note-body h1{font-size:1.6rem;font-weight:700;margin:1.2rem 0 .5rem;letter-spacing:-.02em}
+    .note-body h2{font-size:1.3rem;font-weight:650;margin:1.1rem 0 .4rem}
+    .note-body h3{font-size:1.1rem;font-weight:600;margin:1rem 0 .3rem}
+    .note-body p{margin:.55rem 0}
+    .note-body ul{list-style:disc;padding-left:1.4rem}.note-body ol{list-style:decimal;padding-left:1.4rem}
+    .note-body li{margin:.2rem 0}
+    .note-body blockquote{border-left:3px solid #18181b;padding:.1rem 0 .1rem 1rem;color:#52525b;margin:.8rem 0}
+    .note-body a{text-decoration:underline}
+    .ql-align-center{text-align:center}.ql-align-right{text-align:right}.ql-align-justify{text-align:justify}
+    .ql-indent-1{padding-left:3em}.ql-indent-2{padding-left:6em}.ql-indent-3{padding-left:9em}
+  </style>
+</head>
+<body>
+  <main class="max-w-5xl mx-auto px-4 sm:px-6 md:px-10 pt-6 sm:pt-8 md:pt-10 pb-32 md:pb-16 space-y-6">
+    <section class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-5 pb-6 border-b border-zinc-200">
+      <div class="space-y-1">
+        <h1 class="text-2xl font-semibold tracking-tight text-zinc-900">Notes</h1>
+        <p class="text-sm text-zinc-500 leading-relaxed">Tulis catatan ala blog/artikel — rapi dan mudah dibaca ulang.</p>
+      </div>
+      <button id="add-btn" class="hidden sm:inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2 active:scale-[.98]">
+        <i class="fa-solid fa-plus"></i>Tulis note
+      </button>
+    </section>
+    <div class="relative"><i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 text-sm"></i>
+      <input id="n-search" type="search" autocomplete="off" placeholder="Cari judul, kategori, atau isi..." class="w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 pl-10 text-sm focus:outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 transition"></div>
+    <div id="n-cats" class="flex gap-2 overflow-x-auto md:flex-wrap md:overflow-visible no-scrollbar py-1"></div>
+    <p id="n-count" class="text-xs text-zinc-500 font-medium"></p>
+    <div id="n-grid" class="grid gap-4 sm:grid-cols-2"></div>
+  </main>
+
+  <button id="fab" aria-label="Tulis note" class="sm:hidden fixed right-5 bottom-28 z-30 w-14 h-14 rounded-full bg-zinc-900 text-white text-xl shadow-xl flex items-center justify-center active:scale-95 transition">
+    <i class="fa-solid fa-plus"></i>
+  </button>
+
+  <script>
+    mountNav('notes');
+    const TOOLBAR = [
+      [{ header: [1, 2, 3, false] }],
+      ['bold', 'italic', 'underline', 'strike'],
+      [{ list: 'ordered' }, { list: 'bullet' }, { indent: '-1' }, { indent: '+1' }],
+      ['blockquote', 'code-block'],
+      [{ align: [] }],
+      ['link', 'clean']
+    ];
+    const state = { search: '', category: '', notes: [], cats: [] };
+    const grid = $('#n-grid'), catsEl = $('#n-cats'), count = $('#n-count');
+    const fmtDate = (d) => new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+
+    function renderChips() {
+      const chip = (label, val) => `<button data-cat="${esc(val)}" class="shrink-0 px-3 py-1.5 rounded-md text-xs font-medium border transition ${state.category === val ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-100'}">${esc(label)}</button>`;
+      catsEl.innerHTML = state.cats.length ? chip('Semua', '') + state.cats.map((c) => chip(`${c.category} (${c.count})`, c.category)).join('') : '';
+      catsEl.querySelectorAll('[data-cat]').forEach((b) => (b.onclick = () => { state.category = b.dataset.cat; load(); }));
+    }
+
+    function render() {
+      count.textContent = `${state.notes.length} note ditemukan`;
+      if (!state.notes.length) {
+        grid.innerHTML = `<div class="sm:col-span-2 text-center py-16 border border-dashed border-zinc-300 rounded-lg bg-white">
+          <i class="fa-regular fa-note-sticky text-3xl text-zinc-300"></i>
+          <p class="mt-3 font-medium text-zinc-900">Belum ada note</p><p class="text-sm text-zinc-500">Klik “Tulis note” untuk mulai.</p></div>`;
+        return;
+      }
+      grid.innerHTML = state.notes.map((n) => `<article data-id="${n.id}" class="bg-white border border-zinc-200 rounded-lg p-5 hover:border-zinc-400 transition flex flex-col gap-3">
+        <div class="flex items-start justify-between gap-3"><h3 class="font-semibold text-zinc-900 leading-snug break-words">${esc(n.title)}</h3>
+          ${n.category ? `<span class="shrink-0 px-2 py-0.5 rounded-md text-xs font-medium border border-zinc-200 text-zinc-600">${esc(n.category)}</span>` : ''}</div>
+        <p class="text-sm text-zinc-500 leading-relaxed line-clamp-3 break-words">${esc(n.excerpt || '')}</p>
+        <p class="text-xs text-zinc-400"><i class="fa-regular fa-clock mr-1"></i>${fmtDate(n.updated_at)}</p>
+        <div class="flex gap-2 pt-3 border-t border-zinc-100">
+          <button data-act="read" class="${BTN_P}"><i class="fa-solid fa-book-open"></i>Baca</button>
+          <button data-act="edit" class="${BTN_S}" aria-label="Edit"><i class="fa-solid fa-pen"></i></button>
+          <button data-act="delete" class="${BTN_D}" aria-label="Hapus"><i class="fa-solid fa-trash-can"></i></button></div></article>`).join('');
+    }
+
+    grid.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-act]'); if (!btn) return;
+      const id = Number(btn.closest('article').dataset.id);
+      const n = state.notes.find((x) => x.id === id); if (!n) return;
+      if (btn.dataset.act === 'read') readNote(id);
+      if (btn.dataset.act === 'edit') editNote(id);
+      if (btn.dataset.act === 'delete') delNote(n);
+    });
+
+    async function load() {
+      grid.innerHTML = Array.from({ length: 2 }, () => '<div class="h-40 rounded-lg bg-zinc-100 animate-pulse"></div>').join('');
+      try {
+        const data = await api('/api/notes?' + new URLSearchParams({ search: state.search, category: state.category }));
+        state.notes = data.notes;
+        if (!state.search && !state.category) state.cats = data.categories;
+        else if (!state.cats.length) state.cats = data.categories;
+      } catch (e) { grid.innerHTML = ''; return toast(e.message, 'error'); }
+      renderChips(); render();
+    }
+
+    async function readNote(id) {
+      let note;
+      try { note = (await api(`/api/notes/${id}`)).note; } catch (e) { return toast(e.message, 'error'); }
+      const m = openModal(`<div class="space-y-5">
+        <div class="space-y-2">${note.category ? `<span class="inline-block px-2 py-0.5 rounded-md text-xs font-medium border border-zinc-200 text-zinc-600">${esc(note.category)}</span>` : ''}
+          <h2 class="text-2xl font-semibold tracking-tight break-words">${esc(note.title)}</h2>
+          <p class="text-xs text-zinc-400">Diperbarui ${fmtDate(note.updated_at)}</p></div>
+        <div class="note-body">${note.content}</div>
+        <div class="grid grid-cols-2 gap-3 pt-2"><button id="rd-edit" class="${BTN_S} py-2.5"><i class="fa-solid fa-pen"></i>Edit</button>
+          <button data-close class="${BTN_P} py-2.5">Tutup</button></div></div>`, { size: 'sm:max-w-3xl' });
+      m.el.querySelector('#rd-edit').onclick = () => { m.close(); openForm(note); };
+    }
+
+    async function editNote(id) {
+      try { openForm((await api(`/api/notes/${id}`)).note); } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function delNote(n) {
+      if (!(await confirmBox({ title: 'Hapus note ini?', text: `"${n.title}" akan dihapus permanen.` }))) return;
+      try { await api(`/api/notes/${n.id}`, { method: 'DELETE' }); toast('Note dihapus'); load(); }
+      catch (e) { toast(e.message, 'error'); }
+    }
+
+    function openForm(note) {
+      const editing = !!note;
+      const m = openModal(`<div class="space-y-6">
+        <div class="flex items-center gap-3"><div class="w-10 h-10 rounded-md border border-zinc-200 bg-zinc-50 flex items-center justify-center"><i class="fa-solid ${editing ? 'fa-pen' : 'fa-plus'}"></i></div>
+          <div><h3 class="text-lg font-semibold tracking-tight">${editing ? 'Edit note' : 'Tulis note baru'}</h3><p class="text-sm text-zinc-500">Format seperti menulis artikel.</p></div></div>
+        <form id="nf" class="space-y-4" novalidate>
+          <div class="space-y-1.5"><label for="f-title" class="text-sm font-medium">Title</label>
+            <input id="f-title" maxlength="150" required placeholder="Judul note" class="${INPUT}" value="${esc(note?.title || '')}"></div>
+          <div class="space-y-1.5"><label for="f-cat" class="text-sm font-medium">Kategori <span class="font-normal text-zinc-500">(opsional)</span></label>
+            <input id="f-cat" maxlength="40" list="cat-list" placeholder="Contoh: Belajar, Ide, Jurnal" class="${INPUT}" value="${esc(note?.category || '')}">
+            <datalist id="cat-list">${state.cats.map((c) => `<option value="${esc(c.category)}">`).join('')}</datalist></div>
+          <div class="space-y-1.5"><label class="text-sm font-medium">Notes</label><div id="f-body"></div></div>
+          <div class="grid grid-cols-2 gap-3 pt-2">
+            <button type="button" data-close class="${BTN_S} py-2.5">Batal</button>
+            <button id="f-save" type="submit" class="${BTN_P} py-2.5"><i class="fa-solid fa-check"></i><span>${editing ? 'Simpan' : 'Tambah'}</span></button></div>
+        </form></div>`, { size: 'sm:max-w-3xl' });
+
+      const q = new Quill(m.el.querySelector('#f-body'), { theme: 'snow', placeholder: 'Mulai menulis...', modules: { toolbar: TOOLBAR } });
+      if (note?.content) q.clipboard.dangerouslyPasteHTML(note.content); // sudah disanitasi server
+
+      m.el.querySelector('#nf').onsubmit = async (e) => {
+        e.preventDefault();
+        const title = m.el.querySelector('#f-title').value.trim();
+        if (!title) return toast('Title wajib diisi', 'error');
+        if (!q.getText().trim()) return toast('Isi notes wajib diisi', 'error');
+        const body = { title, category: m.el.querySelector('#f-cat').value.trim(), content: q.root.innerHTML };
+        const btn = m.el.querySelector('#f-save'); btn.disabled = true; btn.classList.add('opacity-60');
+        try {
+          await api(editing ? `/api/notes/${note.id}` : '/api/notes', { method: editing ? 'PUT' : 'POST', body });
+          m.close(); toast(editing ? 'Note diperbarui' : 'Note ditambahkan'); load();
+        } catch (err) { toast(err.message, 'error'); btn.disabled = false; btn.classList.remove('opacity-60'); }
+      };
+      setTimeout(() => m.el.querySelector('#f-title').focus(), 50);
+    }
+
+    let tmr; $('#n-search').addEventListener('input', (e) => { clearTimeout(tmr); tmr = setTimeout(() => { state.search = e.target.value.trim(); load(); }, 300); });
+    $('#add-btn').onclick = () => openForm(null);
+    $('#fab').onclick = () => openForm(null);
+    load();
+  </script>
+</body>
+</html>

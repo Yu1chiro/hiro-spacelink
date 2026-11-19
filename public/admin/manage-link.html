@@ -153,7 +153,8 @@ function confirmBox({ title, text, okText = 'Hapus' }) {
 function mountNav(active) {
   const items = [
     { href: '/dashboard', key: 'dashboard', icon: 'fa-solid fa-table-columns', label: 'Dashboard' },
-    { href: '/manage-link', key: 'manage', icon: 'fa-solid fa-link', label: 'Kelola Link' }
+    { href: '/manage-link', key: 'manage', icon: 'fa-solid fa-link', label: 'Kelola Link' },
+    { href: '/notes', key: 'notes', icon: 'fa-solid fa-note-sticky', label: 'Notes' }
   ];
   const R = NAV_SIDE === 'right';
   document.body.classList.add(R ? 'md:pr-60' : 'md:pl-60');
@@ -191,7 +192,7 @@ function mountNav(active) {
 
   const bottom = document.createElement('nav');
   bottom.className = 'md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-zinc-200 px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]';
-  bottom.innerHTML = `<div class="grid grid-cols-3 gap-2">
+  bottom.innerHTML = `<div class="grid grid-cols-4 gap-2">
     ${items.map((i) => `<a href="${i.href}" class="flex flex-col items-center gap-1 py-2 rounded-md text-xs font-medium transition ${i.key === active ? 'bg-zinc-900 text-white' : 'text-zinc-500'}"><i class="${i.icon} text-lg"></i>${i.label}</a>`).join('')}
     <button id="nav-logout-m" class="flex flex-col items-center gap-1 py-2 rounded-md text-xs font-medium text-zinc-500"><i class="fa-solid fa-right-from-bracket text-lg"></i>Keluar</button></div>`;
   document.body.appendChild(bottom);

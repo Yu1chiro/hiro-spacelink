@@ -86,6 +86,48 @@ function validateLink(b = {}) {
   return { name, url, category, credential: cred.value };
 }
 
+// ---------- Notes helpers ----------
+function cleanNoteHtml(raw) {
+  if (typeof raw !== 'string') return { error: 'Format isi note tidak valid' };
+  const html = xss(raw, {
+    whiteList: {
+      p: ['class'], br: [], strong: [], em: [], u: [], s: [], span: ['class'],
+      h1: ['class'], h2: ['class'], h3: ['class'],
+      blockquote: ['class'], pre: ['class'], code: [],
+      ol: ['class'], ul: ['class'], li: ['class'],
+      a: ['href', 'target', 'rel']
+    },
+    onTagAttr: function (tag, name, value) {
+      if (tag === 'a' && name === 'href') {
+        if (!/^https?:\/\//i.test(value)) return '';
+        return 'href="' + xss.escapeAttrValue(value) + '" target="_blank" rel="noopener noreferrer"';
+      }
+      if (name === 'class') {
+        // hanya class bawaan Quill (ql-align-center, ql-indent-1, ql-syntax, dst)
+        return /^(ql-[a-z0-9-]+)( ql-[a-z0-9-]+)*$/.test(value) ? 'class="' + value + '"' : '';
+      }
+    }
+  });
+  const text = html.replace(/<[^>]*>/g, '').trim();
+  if (!text) return { error: 'Isi note wajib diisi' };
+  if (html.length > 40000) return { error: 'Isi note terlalu panjang (maks 40.000 karakter)' };
+  return { value: html };
+}
+
+function validateNote(b = {}) {
+  const title = String(b.title || '').trim();
+  const category = String(b.category || '').trim();
+  if (!title || title.length > 150) return { error: 'Judul wajib diisi (maks 150 karakter)' };
+  if (category.length > 40) return { error: 'Kategori maks 40 karakter' };
+  const c = cleanNoteHtml(b.content);
+  if (c.error) return { error: c.error };
+  return { title, category: category || null, content: c.value };
+}
+
+const NOTE_LIST_COLS = `id, title, category, created_at, updated_at,
+  left(btrim(regexp_replace(regexp_replace(content, '<[^>]*>', ' ', 'g'), '\\s+', ' ', 'g')), 180) AS excerpt`;
+const NOTE_FULL_COLS = 'id, title, category, content, created_at, updated_at';
+
 const LINK_COLS = `id, code, name, url, category, (credential_enc IS NOT NULL) AS has_credential,
   click_count, scan_count, created_at, updated_at`;
 
@@ -122,7 +164,7 @@ app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('Referrer-Policy', 'same-origin');
   res.set('X-Frame-Options', 'DENY');
-  if (req.path.startsWith('/api') || ['/', '/dashboard', '/manage-link'].includes(req.path)) {
+  if (req.path.startsWith('/api') || ['/', '/dashboard', '/manage-link', '/notes'].includes(req.path)) {
     res.set('Cache-Control', 'no-store');
   }
   next();
@@ -149,6 +191,7 @@ app.get('/', h(async (req, res) => {
 }));
 app.get('/dashboard', requirePage, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin', 'dashboard.html')));
 app.get('/manage-link', requirePage, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin', 'manage-link.html')));
+app.get('/notes', requirePage, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin', 'notes.html')));
 app.use('/admin', (req, res) => res.status(404).end());
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
@@ -270,6 +313,60 @@ app.get('/api/links/:id/credential', requireApi, h(async (req, res) => {
   if (!rows[0].credential_enc) return res.json({ credential: '' });
   try { res.json({ credential: decrypt(rows[0].credential_enc) }); }
   catch { res.status(500).json({ error: 'Credential tidak dapat didekripsi (cek CREDENTIAL_KEY)' }); }
+}));
+
+// ---------- Notes CRUD ----------
+app.get('/api/notes', requireApi, h(async (req, res) => {
+  const search = String(req.query.search || '').trim().slice(0, 100);
+  const category = String(req.query.category || '').trim().slice(0, 40);
+  const where = []; const params = [];
+  if (search) {
+    params.push('%' + search.replace(/[\\%_]/g, '\\$&') + '%');
+    where.push(`(title ILIKE $${params.length} OR category ILIKE $${params.length} OR content ILIKE $${params.length})`);
+  }
+  if (category) { params.push(category); where.push(`category = $${params.length}`); }
+  const [list, cats] = await Promise.all([
+    pool.query(`SELECT ${NOTE_LIST_COLS} FROM notes ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY updated_at DESC, id DESC`, params),
+    pool.query(`SELECT category, COUNT(*)::int AS count FROM notes WHERE category IS NOT NULL GROUP BY category ORDER BY category`)
+  ]);
+  res.json({ notes: list.rows, categories: cats.rows });
+}));
+
+app.get('/api/notes/:id', requireApi, h(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID tidak valid' });
+  const { rows } = await pool.query(`SELECT ${NOTE_FULL_COLS} FROM notes WHERE id = $1`, [id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Note tidak ditemukan' });
+  res.json({ note: rows[0] });
+}));
+
+app.post('/api/notes', requireApi, h(async (req, res) => {
+  const v = validateNote(req.body);
+  if (v.error) return res.status(400).json({ error: v.error });
+  const { rows } = await pool.query(
+    `INSERT INTO notes (title, category, content) VALUES ($1,$2,$3) RETURNING ${NOTE_FULL_COLS}`,
+    [v.title, v.category, v.content]);
+  res.status(201).json({ note: rows[0] });
+}));
+
+app.put('/api/notes/:id', requireApi, h(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID tidak valid' });
+  const v = validateNote(req.body);
+  if (v.error) return res.status(400).json({ error: v.error });
+  const { rows } = await pool.query(
+    `UPDATE notes SET title=$1, category=$2, content=$3, updated_at=now() WHERE id=$4 RETURNING ${NOTE_FULL_COLS}`,
+    [v.title, v.category, v.content, id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Note tidak ditemukan' });
+  res.json({ note: rows[0] });
+}));
+
+app.delete('/api/notes/:id', requireApi, h(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID tidak valid' });
+  const r = await pool.query('DELETE FROM notes WHERE id = $1', [id]);
+  if (!r.rowCount) return res.status(404).json({ error: 'Note tidak ditemukan' });
+  res.json({ ok: true });
 }));
 
 // ---------- Public redirect (target QR) ----------
